@@ -37,10 +37,11 @@
 
 (defconst package-autosuggest-database
   (eval-when-compile
-    (with-temp-buffer
-      (insert-file-contents
-       (expand-file-name "package-autosuggest.eld" data-directory))
-      (read (current-buffer))))
+    (if-let* ((db (expand-file-name "package-autosuggest.eld" data-directory))
+              ((file-exists-p db)))
+      (with-temp-buffer
+        (insert-file-contents db)
+        (read (current-buffer)))))
   "List of hints for packages to suggest installing.
 Each hint has the form (PACKAGE TYPE DATA), where PACKAGE is a symbol
 denoting the package and major-mode the hint applies to, TYPE is one of
