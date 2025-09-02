@@ -607,7 +607,9 @@ directory."
       (set-visited-file-name file)
       (set-buffer-modified-p nil)
       (when (string-match "\\.tar\\'" file) (tar-mode)))
-    (package-install-from-buffer)))
+    (unwind-protect
+        (package-install-from-buffer)
+      (fundamental-mode))))
 
 
 
@@ -872,18 +874,22 @@ The return result is a `package-desc'."
 This uses `tar-untar-buffer' from Tar mode.  All files should
 untar into a directory named DIR; otherwise, signal an error."
   (tar-mode)
-  ;; Make sure everything extracts into DIR.
-  (let ((regexp (concat "\\`" (regexp-quote (expand-file-name dir)) "/"))
-        (case-fold-search (file-name-case-insensitive-p dir)))
-    (dolist (tar-data tar-parse-info)
-      (let ((name (expand-file-name (tar-header-name tar-data))))
-        (or (string-match regexp name)
-            ;; Tarballs created by some utilities don't list
-            ;; directories with a trailing slash (Bug#13136).
-            (and (string-equal (expand-file-name dir) name)
-                 (eq (tar-header-link-type tar-data) 5))
-            (error "Package does not untar cleanly into directory %s/" dir)))))
-  (tar-untar-buffer))
+  (unwind-protect
+      (progn
+        ;; Make sure everything extracts into DIR.
+        (let ((regexp (concat "\\`" (regexp-quote (expand-file-name dir)) "/"))
+              (case-fold-search (file-name-case-insensitive-p dir)))
+          (dolist (tar-data tar-parse-info)
+            (let ((name (expand-file-name (tar-header-name tar-data))))
+              (or (string-match regexp name)
+                  ;; Tarballs created by some utilities don't list
+                  ;; directories with a trailing slash (Bug#13136).
+                  (and (string-equal (expand-file-name dir) name)
+                       (eq (tar-header-link-type tar-data) 5))
+                  (error "Package does not untar cleanly into directory %s/"
+                         dir)))))
+        (tar-untar-buffer))
+    (fundamental-mode)))
 
 (declare-function dired-get-marked-files "dired")
 

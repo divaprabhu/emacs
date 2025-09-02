@@ -396,25 +396,28 @@
 ;;   revision shown, rather than the working revision, which is normally
 ;;   the case).  Not all backends support this.
 ;;
-;; - log-outgoing (buffer remote-location) (DEPRECATED)
+;; - log-outgoing (buffer upstream-location) (DEPRECATED)
 ;;
 ;;   Insert in BUFFER the revision log for the changes that will be
-;;   sent when performing a push operation to REMOTE-LOCATION.
+;;   sent when performing a push operation to UPSTREAM-LOCATION.
 ;;   Deprecated: implement incoming-revision and mergebase instead.
 ;;
-;; - log-incoming (buffer remote-location) (DEPRECATED)
+;; - log-incoming (buffer upstream-location) (DEPRECATED)
 ;;
 ;;   Insert in BUFFER the revision log for the changes that will be
-;;   received when performing a pull operation from REMOTE-LOCATION.
+;;   received when performing a pull operation from UPSTREAM-LOCATION.
 ;;   Deprecated: implement incoming-revision and mergebase instead.
 ;;
-;; * incoming-revision (remote-location)
+;; * incoming-revision (upstream-location &optional refresh)
 ;;
-;;   Return revision at the head of the branch at REMOTE-LOCATION.
+;;   Return revision at the head of the branch at UPSTREAM-LOCATION.
 ;;   If there is no such branch there, return nil.  (Should signal an
 ;;   error, not return nil, in the case that fetching data fails.)
 ;;   For a distributed VCS, should also fetch that revision into local
 ;;   storage for operating on by subsequent calls into the backend.
+;;   The backend may rely on cached information from a previous fetch
+;;   from UPSTREAM-LOCATION unless REFRESH is non-nil, which means that
+;;   the most up-to-date information possible is required.
 ;;
 ;; - log-search (buffer pattern)
 ;;
@@ -2456,9 +2459,8 @@ state of each file in the fileset."
   (when (and (not rev1) rev2)
     (error "Not a valid revision range"))
   (vc--with-backend-in-rootdir "VC root-diff"
-    (let ((default-directory rootdir))
-      (vc-diff-internal vc-allow-async-diff (list backend (list rootdir)) rev1 rev2
-                        (called-interactively-p 'interactive)))))
+    (vc-diff-internal vc-allow-async-diff (list backend (list rootdir)) rev1 rev2
+                      (called-interactively-p 'interactive))))
 
 ;;;###autoload
 (defun vc-diff (&optional historic not-essential fileset)
@@ -2531,37 +2533,77 @@ The merge base is a common ancestor between REV1 and REV2 revisions."
   (when (and (not rev1) rev2)
     (error "Not a valid revision range"))
   (vc--with-backend-in-rootdir "VC root-diff"
-    (let ((default-directory rootdir)
-          (rev1 (vc-call-backend backend 'mergebase rev1 rev2)))
+    (let ((rev1 (vc-call-backend backend 'mergebase rev1 rev2)))
       (vc-diff-internal
        vc-allow-async-diff (list backend (list rootdir)) rev1 rev2
        (called-interactively-p 'interactive)))))
 
 ;;;###autoload
-(defun vc-root-diff-incoming (&optional remote-location)
-  "Report diff of all changes that would be pulled from REMOTE-LOCATION.
-When unspecified REMOTE-LOCATION is the place \\[vc-update] would pull from.
-When called interactively with a prefix argument, prompt for REMOTE-LOCATION.
-In some version control systems REMOTE-LOCATION can be a remote branch name.
+(defun vc-root-diff-incoming (&optional upstream-location)
+  "Report diff of all changes that would be pulled from UPSTREAM-LOCATION.
+When unspecified UPSTREAM-LOCATION is the place \\[vc-update] would pull
+from.  When called interactively with a prefix argument, prompt for
+UPSTREAM-LOCATION.  In some version control systems UPSTREAM-LOCATION
+can be a remote branch name.
 
 See `vc-use-incoming-outgoing-prefixes' regarding giving this command a
 global binding."
-  (interactive (vc--maybe-read-remote-location))
+  (interactive (list (vc--maybe-read-upstream-location)))
   (vc--with-backend-in-rootdir "VC root-diff"
-    (let ((default-directory rootdir)
-          (incoming (vc--incoming-revision backend
-                                           (or remote-location ""))))
-      (vc-diff-internal vc-allow-async-diff (list backend (list rootdir))
-                        (vc-call-backend backend 'mergebase incoming)
-                        incoming
-                        (called-interactively-p 'interactive)))))
+    (vc-diff-incoming upstream-location `(,backend (,rootdir)))))
 
 ;;;###autoload
-(defun vc-root-diff-outgoing (&optional remote-location)
-  "Report diff of all changes that would be pushed to REMOTE-LOCATION.
-When unspecified REMOTE-LOCATION is the place \\[vc-push] would push to.
-When called interactively with a prefix argument, prompt for REMOTE-LOCATION.
-In some version control systems REMOTE-LOCATION can be a remote branch name.
+(defun vc-diff-incoming (&optional upstream-location fileset)
+  "Report changes to VC fileset that would be pulled from UPSTREAM-LOCATION.
+When unspecified UPSTREAM-LOCATION is the place \\[vc-update] would pull
+from.  When called interactively with a prefix argument, prompt for
+UPSTREAM-LOCATION.  In some version control systems UPSTREAM-LOCATION
+can be a remote branch name.
+When called from Lisp optional argument FILESET overrides the VC
+fileset.
+
+See `vc-use-incoming-outgoing-prefixes' regarding giving this command a
+global binding."
+  (interactive (list (vc--maybe-read-upstream-location) nil))
+  (let* ((fileset (or fileset (vc-deduce-fileset t)))
+         (backend (car fileset))
+         (incoming (vc--incoming-revision backend
+                                          (or upstream-location "")
+                                          'refresh)))
+    (vc-diff-internal vc-allow-async-diff fileset
+                      (vc-call-backend backend 'mergebase incoming)
+                      incoming
+                      (called-interactively-p 'interactive))))
+
+;;;###autoload
+(defun vc-root-diff-outgoing (&optional upstream-location)
+  "Report diff of all changes that would be pushed to UPSTREAM-LOCATION.
+When unspecified UPSTREAM-LOCATION is the place \\[vc-push] would push
+to.  When called interactively with a prefix argument, prompt for
+UPSTREAM-LOCATION.  In some version control systems UPSTREAM-LOCATION
+can be a remote branch name.
+
+This command is like `vc-root-diff-outgoing-base' except that it does
+not include uncommitted changes.
+
+See `vc-use-incoming-outgoing-prefixes' regarding giving this command a
+global binding."
+  (interactive (list (vc--maybe-read-upstream-location)))
+  (vc--with-backend-in-rootdir "VC root-diff"
+    (vc-diff-outgoing upstream-location `(,backend (,rootdir)))))
+
+;;;###autoload
+(defun vc-diff-outgoing (&optional upstream-location fileset)
+  "Report changes to VC fileset that would be pushed to UPSTREAM-LOCATION.
+When unspecified UPSTREAM-LOCATION is the place \\[vc-push] would push
+to.  When called interactively with a prefix argument, prompt for
+UPSTREAM-LOCATION.  In some version control systems UPSTREAM-LOCATION
+can be a remote branch name.
+When called from Lisp optional argument FILESET overrides the VC
+fileset.
+
+This command is like `vc-diff-outgoing-base' except that it does not
+include uncommitted changes.
 
 See `vc-use-incoming-outgoing-prefixes' regarding giving this command a
 global binding."
@@ -2570,38 +2612,103 @@ global binding."
   ;; for those VCS is to make a comparison between locally committed
   ;; changes and remote committed changes.
   ;; (Hence why we don't call `vc-buffer-sync-fileset'.)
-  (interactive (vc--maybe-read-remote-location))
+  (interactive (list (vc--maybe-read-upstream-location)))
+  (let* ((fileset (or fileset (vc-deduce-fileset t)))
+         (backend (car fileset))
+         (incoming (vc--incoming-revision backend
+                                          (or upstream-location ""))))
+    (vc-diff-internal vc-allow-async-diff fileset
+                      (vc-call-backend backend 'mergebase incoming)
+                      ;; FIXME: In order to exclude uncommitted
+                      ;; changes we need to pass the most recent
+                      ;; revision as REV2.  Calling `working-revision'
+                      ;; like this works for all the backends we have
+                      ;; in core that implement `mergebase' and so can
+                      ;; be used with this command (Git and Hg).
+                      ;; However, it is not clearly permitted by the
+                      ;; current semantics of `working-revision' to
+                      ;; call it on a directory.
+                      ;;
+                      ;; A possible alternative would be something
+                      ;; like this which effectively falls back to
+                      ;; including uncommitted changes in the case of
+                      ;; an older VCS or where the backend rejects our
+                      ;; attempt to call `working-revision' on a
+                      ;; directory:
+                      ;; (and (eq (vc-call-backend backend
+                      ;;                           'revision-granularity)
+                      ;;          'repository)
+                      ;;      (ignore-errors
+                      ;;        (vc-call-backend backend 'working-revision
+                      ;;                         (car fileset)))
+                      (vc-call-backend backend 'working-revision
+                                       (car fileset))
+                      (called-interactively-p 'interactive))))
+
+;; For the following two commands, the default meaning for
+;; UPSTREAM-LOCATION may become dependent on whether we are on a
+;; shorter-lived or longer-lived ("trunk") branch.  If we are on the
+;; trunk then it will always be the place `vc-push' would push to.  If
+;; we are on a shorter-lived branch, it may instead become the remote
+;; trunk branch from which the shorter-lived branch was branched.  That
+;; way you can use these commands to get a summary of all unmerged work
+;; outstanding on the short-lived branch.
+;;
+;; The obstacle to doing this is that VC lacks any distinction between
+;; shorter-lived and trunk branches.  But we all work with both of
+;; these, for almost any VCS workflow.  E.g. modern workflows which
+;; eschew traditional feature branches still have a long-lived trunk
+;; plus shorter-lived local branches for merge requests or patch series.
+;; --spwhitton
+
+;;;###autoload
+(defun vc-root-diff-outgoing-base (&optional upstream-location)
+  "Report diff of all changes since the merge base with UPSTREAM-LOCATION.
+The merge base with UPSTREAM-LOCATION means the common ancestor of the
+working revision and UPSTREAM-LOCATION.
+Uncommitted changes are included in the diff.
+
+When unspecified UPSTREAM-LOCATION is the place \\[vc-push] would push
+to.  This default meaning for UPSTREAM-LOCATION may change in a future
+release of Emacs.
+
+When called interactively with a prefix argument, prompt for
+UPSTREAM-LOCATION.  In some version control systems, UPSTREAM-LOCATION
+can be a remote branch name.
+
+This command is like `vc-root-diff-outgoing' except that it includes
+uncommitted changes."
+  (interactive (list (vc--maybe-read-upstream-location)))
   (vc--with-backend-in-rootdir "VC root-diff"
-    (let ((default-directory rootdir)
-          (incoming (vc--incoming-revision backend
-                                           (or remote-location ""))))
-      (vc-diff-internal vc-allow-async-diff (list backend (list rootdir))
-                        (vc-call-backend backend 'mergebase incoming)
-                        ;; FIXME: In order to exclude uncommitted
-                        ;; changes we need to pass the most recent
-                        ;; revision as REV2.  Calling `working-revision'
-                        ;; like this works for all the backends we have
-                        ;; in core that implement `mergebase' and so can
-                        ;; be used with this command (Git and Hg).
-                        ;; However, it is not clearly permitted by the
-                        ;; current semantics of `working-revision' to
-                        ;; call it on a directory.
-                        ;;
-                        ;; A possible alternative would be something
-                        ;; like this which effectively falls back to
-                        ;; including uncommitted changes in the case of
-                        ;; an older VCS or where the backend rejects our
-                        ;; attempt to call `working-revision' on a
-                        ;; directory:
-                        ;; (and (eq (vc-call-backend backend
-                        ;;                           'revision-granularity)
-                        ;;          'repository)
-                        ;;      (ignore-errors
-                        ;;        (vc-call-backend backend 'working-revision
-                        ;;                         rootdir)))
-                        (vc-call-backend backend 'working-revision
-                                         rootdir)
-                        (called-interactively-p 'interactive)))))
+    (vc-diff-outgoing-base upstream-location `(,backend (,rootdir)))))
+
+;;;###autoload
+(defun vc-diff-outgoing-base (&optional upstream-location fileset)
+  "Report changes to VC fileset since the merge base with UPSTREAM-LOCATION.
+
+The merge base with UPSTREAM-LOCATION means the common ancestor of the
+working revision and UPSTREAM-LOCATION.
+Uncommitted changes are included in the diff.
+
+When unspecified UPSTREAM-LOCATION is the place \\[vc-push] would push
+to.  This default meaning for UPSTREAM-LOCATION may change in a future
+release of Emacs.
+
+When called interactively with a prefix argument, prompt for
+UPSTREAM-LOCATION.  In some version control systems, UPSTREAM-LOCATION
+can be a remote branch name.
+
+This command is like to `vc-fileset-diff-outgoing' except that it
+includes uncommitted changes."
+  (interactive (list (vc--maybe-read-upstream-location) nil))
+  (let* ((fileset (or fileset (vc-deduce-fileset t)))
+         (backend (car fileset))
+         (incoming (vc--incoming-revision backend
+                                          (or upstream-location ""))))
+    (vc-diff-internal vc-allow-async-diff fileset
+                      (vc-call-backend backend 'mergebase incoming)
+                      nil
+                      (called-interactively-p 'interactive))))
 
 (declare-function ediff-load-version-control "ediff" (&optional silent))
 (declare-function ediff-vc-internal "ediff-vers"
@@ -2674,8 +2781,7 @@ saving the buffer."
       ;; relative to it.  Bind default-directory to the root directory
       ;; here, this way the *vc-diff* buffer is setup correctly, so
       ;; relative file names work.
-      (let ((default-directory rootdir)
-            (fileset `(,backend (,rootdir))))
+      (let ((fileset `(,backend (,rootdir))))
         (vc-buffer-sync-fileset fileset not-essential)
         (vc-diff-internal vc-allow-async-diff fileset nil nil
                           (called-interactively-p 'interactive))))))
@@ -3342,15 +3448,15 @@ Each function runs in the log output buffer without args.")
        (set-buffer-modified-p nil)
        (run-hooks 'vc-log-finish-functions)))))
 
-(defun vc-incoming-outgoing-internal (backend remote-location buffer-name type)
+(defun vc-incoming-outgoing-internal (backend upstream-location buffer-name type)
   (vc-log-internal-common
    backend buffer-name nil type
    (lambda (bk buf type-arg _files)
-     (vc-call-backend bk type-arg buf remote-location))
+     (vc-call-backend bk type-arg buf upstream-location))
    (lambda (_bk _files-arg _ret) nil)
    nil ;; Don't move point.
    (lambda (_ignore-auto _noconfirm)
-     (vc-incoming-outgoing-internal backend remote-location buffer-name type))))
+     (vc-incoming-outgoing-internal backend upstream-location buffer-name type))))
 
 ;;;###autoload
 (defun vc-print-log (&optional working-revision limit)
@@ -3444,50 +3550,53 @@ The command prompts for the branch whose change log to show."
                            (list rootdir) branch t
                            (when (> vc-log-show-limit 0) vc-log-show-limit))))
 
+;; FIXME: Consider renaming to `vc-upstream-location-history'.
 (defvar vc-remote-location-history nil
-  "History for remote locations for VC incoming and outgoing commands.")
+  "History of upstream locations for VC incoming and outgoing commands.")
 
-(defun vc--maybe-read-remote-location ()
+(defun vc--maybe-read-upstream-location ()
   (and current-prefix-arg
-       (list (read-string "Remote location/branch (empty for default): "
-                          'vc-remote-location-history))))
+       (read-string "Upstream location/branch (empty for default): " nil
+                    'vc-remote-location-history)))
 
-(defun vc--incoming-revision (backend remote-location)
-  (or (vc-call-backend backend 'incoming-revision remote-location)
+(defun vc--incoming-revision (backend upstream-location &optional refresh)
+  (or (vc-call-backend backend 'incoming-revision upstream-location refresh)
       (user-error "No incoming revision -- local-only branch?")))
 
 ;;;###autoload
-(defun vc-log-incoming (&optional remote-location)
-  "Show log of changes that will be received with pull from REMOTE-LOCATION.
-When unspecified REMOTE-LOCATION is the place \\[vc-update] would pull from.
-When called interactively with a prefix argument, prompt for REMOTE-LOCATION.
-In some version control systems REMOTE-LOCATION can be a remote branch name."
-  (interactive (vc--maybe-read-remote-location))
+(defun vc-log-incoming (&optional upstream-location)
+  "Show log of changes that will be received with pull from UPSTREAM-LOCATION.
+When unspecified UPSTREAM-LOCATION is the place \\[vc-update] would pull
+from.  When called interactively with a prefix argument, prompt for
+UPSTREAM-LOCATION.  In some version control systems UPSTREAM-LOCATION
+can be a remote branch name."
+  (interactive (list (vc--maybe-read-upstream-location)))
   (vc--with-backend-in-rootdir "VC root-log"
-    (vc-incoming-outgoing-internal backend (or remote-location "")
+    (vc-incoming-outgoing-internal backend (or upstream-location "")
                                    "*vc-incoming*" 'log-incoming)))
 
-(defun vc-default-log-incoming (_backend buffer remote-location)
+(defun vc-default-log-incoming (_backend buffer upstream-location)
   (vc--with-backend-in-rootdir ""
-    (let ((incoming (vc--incoming-revision backend remote-location)))
+    (let ((incoming (vc--incoming-revision backend upstream-location 'refresh)))
       (vc-call-backend backend 'print-log (list rootdir) buffer t
                        incoming
                        (vc-call-backend backend 'mergebase incoming)))))
 
 ;;;###autoload
-(defun vc-log-outgoing (&optional remote-location)
-  "Show log of changes that will be sent with a push operation to REMOTE-LOCATION.
-When unspecified REMOTE-LOCATION is the place \\[vc-push] would push to.
-When called interactively with a prefix argument, prompt for REMOTE-LOCATION.
-In some version control systems REMOTE-LOCATION can be a remote branch name."
-  (interactive (vc--maybe-read-remote-location))
+(defun vc-log-outgoing (&optional upstream-location)
+  "Show log of changes that will be sent with a push to UPSTREAM-LOCATION.
+When unspecified UPSTREAM-LOCATION is the place \\[vc-push] would push
+to.  When called interactively with a prefix argument, prompt for
+UPSTREAM-LOCATION.  In some version control systems UPSTREAM-LOCATION
+can be a remote branch name."
+  (interactive (list (vc--maybe-read-upstream-location)))
   (vc--with-backend-in-rootdir "VC root-log"
-    (vc-incoming-outgoing-internal backend (or remote-location "")
+    (vc-incoming-outgoing-internal backend (or upstream-location "")
                                    "*vc-outgoing*" 'log-outgoing)))
 
-(defun vc-default-log-outgoing (_backend buffer remote-location)
+(defun vc-default-log-outgoing (_backend buffer upstream-location)
   (vc--with-backend-in-rootdir ""
-    (let ((incoming (vc--incoming-revision backend remote-location)))
+    (let ((incoming (vc--incoming-revision backend upstream-location)))
       (vc-call-backend backend 'print-log (list rootdir) buffer t
                        ""
                        (vc-call-backend backend 'mergebase incoming)))))
@@ -3568,10 +3677,12 @@ to the working revision (except for keyword expansion)."
     ;; If any of the files is visited by the current buffer, make sure
     ;; buffer is saved.  If the user says `no', abort since we cannot
     ;; show the changes and ask for confirmation to discard them.
-    (when (or (not files) (memq (buffer-file-name) files))
+    (when-let* ((n (buffer-file-name))
+                ((or (not files) (member n files))))
       (vc-buffer-sync nil))
     (save-some-buffers nil (lambda ()
-                             (member (buffer-file-name) files)))
+                             (and-let* ((n (buffer-file-name)))
+                               (member n files))))
     (let (needs-save)
       (dolist (file files)
         (let ((buf (get-file-buffer file)))

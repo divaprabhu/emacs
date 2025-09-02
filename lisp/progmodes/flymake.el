@@ -195,8 +195,6 @@ margins).
 Difference between fringes and margin is that fringes support displaying
 bitmaps on graphical displays and margins display text in a blank area
 from current buffer that works in both graphical and text displays.
-Thus, even when `fringes' is selected, margins will still be used on
-text displays and also when fringes are disabled.
 
 See Info node `Fringes' and Info node `(elisp)Display Margins'."
   :version "31.1"
@@ -1172,6 +1170,13 @@ report applies to that region."
            (flymake--state-foreign-diags state))
   (clrhash (flymake--state-foreign-diags state)))
 
+(defun flymake--clear-state (state)
+  (cl-loop for diag in (flymake--state-diags state)
+           for ov = (flymake--diag-overlay diag)
+           when ov do (flymake--delete-overlay ov))
+  (setf (flymake--state-diags state) nil)
+  (flymake--clear-foreign-diags state))
+
 (defvar-local flymake-mode nil)
 
 (defvar-local flymake--mode-line-counter-cache nil
@@ -1189,7 +1194,7 @@ and other buffers."
     ;;
     (cond
      (;; If there is a `region' arg, only affect the diagnostics whose
-      ;; overlays are in a certain region.  Discard "foreign"
+      ;; overlays are in a certain region.  Ignore "foreign"
       ;; diagnostics.
       region
       (cl-loop for diag in (flymake--state-diags state)
@@ -1202,16 +1207,9 @@ and other buffers."
                else collect diag into surviving
                finally (setf (flymake--state-diags state)
                              surviving)))
-     (;; Else, if this is the first report, zero all lists and delete
-      ;; all associated overlays.
+     (;; Else, if this is the first report, fully clear this state.
       (not (flymake--state-reported-p state))
-      (cl-loop for diag in (flymake--state-diags state)
-               for ov = (flymake--diag-overlay diag)
-               when ov do (flymake--delete-overlay ov))
-      (setf (flymake--state-diags state) nil)
-      ;; Also clear all overlays for `foreign-diags' in all other
-      ;; buffers.
-      (flymake--clear-foreign-diags state))
+      (flymake--clear-state state))
      (;; If this is not the first report, do no cleanup.
        t))
 
@@ -1415,16 +1413,7 @@ Interactively, with a prefix arg, FORCE is t."
                ;; See bug#78862
                (maphash (lambda (backend state)
                           (unless (memq backend flymake-diagnostic-functions)
-                            ;; Delete all overlays
-                            (dolist (diag (flymake--state-diags state))
-                              (let ((ov (flymake--diag-overlay diag)))
-                                (flymake--delete-overlay ov)))
-                            ;; Set the list of diagnostics to nil to
-                            ;; avoid trying to delete them again.
-                            ;; We keep the state object itself around in
-                            ;; case there's still diagnostics in flight,
-                            ;; so we don't break things.
-                            (setf (flymake--state-diags state) nil)))
+                            (flymake--clear-state state)))
                         flymake--state)
                (run-hook-wrapped
                 'flymake-diagnostic-functions
@@ -1504,13 +1493,6 @@ special *Flymake log* buffer."  :group 'flymake :lighter
     (add-hook 'after-save-hook 'flymake-after-save-hook nil t)
     (add-hook 'kill-buffer-hook 'flymake-kill-buffer-hook nil t)
     (add-hook 'eldoc-documentation-functions 'flymake-eldoc-function t t)
-
-    (when (and (eq flymake-indicator-type 'fringes)
-               (not (cl-case flymake-fringe-indicator-position
-                      (left-fringe (< 0 (nth 0 (window-fringes))))
-                      (right-fringe (< 0 (nth 1 (window-fringes)))))))
-      ;; There are no fringes in the buffer, fallback to margins.
-      (setq-local flymake-indicator-type 'margins))
 
     ;; AutoResize margins.
     (flymake--resize-margins)
