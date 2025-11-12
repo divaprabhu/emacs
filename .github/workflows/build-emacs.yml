@@ -1,0 +1,60 @@
+name: Build Emacs (Ubuntu)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+env:
+  EMACS_VERSION: "30.2"
+  
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Replace sources.list
+        run: |
+          echo "deb http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse" | sudo tee /etc/apt/sources.list
+          echo "deb-src http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list
+          echo "deb http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list
+          echo "deb-src http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list
+          echo "deb http://archive.ubuntu.com/ubuntu noble-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list
+          echo "deb-src http://archive.ubuntu.com/ubuntu noble-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list
+          echo "deb http://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list
+          echo "deb-src http://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list
+          sudo apt-get update
+
+      - name: Install build dependencies for Emacs
+        run: |
+          sudo apt-get update
+          sudo apt-get install build-essential
+          sudo apt-get build-dep -y emacs
+
+      - name: Clone Emacs source
+        run: |
+          git clone --depth 1 https://github.com/emacs-mirror/emacs.git
+          git checkout tags/emacs-${{ env.EMACS_VERSION }}
+          cd emacs
+          ./autogen.sh
+          ./configure --with-pgtk --with-native-compilation=aot --with-tree-sitter
+          make -j$(nproc)
+          cd ..
+
+      - name: Package Emacs binary
+        run: |
+          cd emacs
+          mkdir -p ../emacs-dist/bin
+          cp src/emacs ../emacs-dist/bin/
+          cp -r lisp ../emacs-dist/
+          cd ..
+          zip -r emacs-${{ github.run_id }}.zip emacs-dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: emacs-binary
+          path: emacs-${{ env.EMACS_VERSION }}.zip
