@@ -56,4 +56,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: emacs-binary
-          path: emacs-${{ env.EMACS_VERSION }}.zip
+          path: ${{ env.DESTDIR }}/emacs-${{ env.EMACS_VERSION }}.zip
