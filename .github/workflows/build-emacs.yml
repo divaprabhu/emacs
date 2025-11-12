@@ -40,6 +40,7 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/emacs-mirror/emacs.git
           cd emacs
+          git fetch tags
           git checkout emacs-${{ env.EMACS_VERSION }}
           ./autogen.sh
           ./configure --prefix=${{ env.PREFIX }} --with-pgtk --with-native-compilation=aot --with-tree-sitter
