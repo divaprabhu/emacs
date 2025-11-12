@@ -7,6 +7,8 @@ on:
       - main
 env:
   EMACS_VERSION: "30.2"
+  PREFIX: "/usr/local"
+  DESTDIR: "/tmp/emacs-install"
   
 jobs:
   build:
@@ -37,21 +39,17 @@ jobs:
       - name: Clone Emacs source
         run: |
           git clone --depth 1 https://github.com/emacs-mirror/emacs.git
-          git checkout tags/emacs-${{ env.EMACS_VERSION }}
+          git checkout emacs-${{ env.EMACS_VERSION }}
           cd emacs
           ./autogen.sh
-          ./configure --with-pgtk --with-native-compilation=aot --with-tree-sitter
+          ./configure --prefix=${{ env.PREFIX }} --with-pgtk --with-native-compilation=aot --with-tree-sitter
           make -j$(nproc)
-          cd ..
+          make install DESTDIR=${{ env.DESTDIR }}
 
       - name: Package Emacs binary
         run: |
-          cd emacs
-          mkdir -p ../emacs-dist/bin
-          cp src/emacs ../emacs-dist/bin/
-          cp -r lisp ../emacs-dist/
-          cd ..
-          zip -r emacs-${{ github.run_id }}.zip emacs-dist
+          cd ${{ env.DESTDIR }}
+          zip -r emacs-${{ env.EMACS_VERSION }}.zip .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
