@@ -39,8 +39,8 @@ jobs:
       - name: Clone Emacs source
         run: |
           git clone --depth 1 https://github.com/emacs-mirror/emacs.git
-          git checkout emacs-${{ env.EMACS_VERSION }}
           cd emacs
+          git checkout emacs-${{ env.EMACS_VERSION }}
           ./autogen.sh
           ./configure --prefix=${{ env.PREFIX }} --with-pgtk --with-native-compilation=aot --with-tree-sitter
           make -j$(nproc)
